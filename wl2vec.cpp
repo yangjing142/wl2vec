@@ -28,7 +28,7 @@ char vocabSaveFile[MAX_STRING], vocabReadFile[MAX_STRING];
 struct vocab_word *vocabulary;//词表
 
 //其中的min_reduce是指在缩小词表操作中会删除词频小于这个值的词
-int cbow = 1, debug_mode = 2, min_count = 5, num_threads = 12, min_reduce = 1;
+int cbow = 0, debug_mode = 2, min_count = 5, num_threads = 12, min_reduce = 1 , wl = 1;
 
 int *hashTable;//词汇表的hash存储
 
@@ -201,19 +201,18 @@ int addWordToVocab(char *word)
 //从文件中读取单个的词
 void readWord(char *word, FILE *fin) 
 {
-	int index = 0;//计数当前读取到的字符在word中的位置
-	int ch;//保存当前读取到的字符
+	int a = 0, ch;//a用于计数word中字符的位置，ch用于保存当前读取到的字符
 
 	while (!feof(fin))//判断是否到达文件结尾 
 	{
 		ch = fgetc(fin);//读入单词
 
-		if (ch == '\n') //需要进入下一行
+		if (ch == 13) //对应EOF，需要进入下一行
 			continue;
 
 		if ((ch == ' ') || (ch == '\t') || (ch == '\n'))//遇到单词边界 
 		{
-			if (index > 0) //word中已经保存了内容
+			if (a > 0) //word中已经保存了内容
 			{
 				if (ch == '\n') 
 					ungetc(ch, fin);//将一个字符退回到输入流中，这个退回的字符会由下一个读取文件流的函数取得
@@ -221,20 +220,26 @@ void readWord(char *word, FILE *fin)
 			}
 
 			if (ch == '\n') 
+			{
+				strcpy(word, (char *)"</s>");//添加sentence结束的标记
+				return;
+			} 
+			else 
 				continue;
 		}
 
-		word[index] = ch;
-		index++;
+		word[a] = ch;
+		a++;
 
-		if (index >= MAX_STRING - 1)//截断过长的单词
-			index--;
+		if (a >= MAX_STRING - 1)//截断过长的单词
+			a--;
 	}
 
-	word[index] = 0;//加上结束符‘\0’
+	word[a] = 0;//加上结束符‘\0’
 }
 
 //从训练文件中读取一个词(用于构建词表)，空格为单词边界
+/*
 void readWordFromFile(char *word,FILE *fin) 
 {
 	int index=0;//计数word中字符的位置
@@ -261,11 +266,6 @@ void readWordFromFile(char *word,FILE *fin)
 		}
 
 		word[index] = 0;//加上结束符‘\0’
-		/*if(index==0)//当前word中没有保存有效词
-		{
-			ch = fgetc(fin);
-			break;
-		}*/
 
 		//当前遇到了单词边界，继续向后读知道遇到回车表示换行
 		while(ch!='\n')
@@ -275,6 +275,7 @@ void readWordFromFile(char *word,FILE *fin)
 		break;
 	}
 }
+*/
 
 //读取词表
 void readVocab() 
@@ -331,6 +332,7 @@ void readVocab()
 void learnVocabFromTrainFile()
 {
 	char word[MAX_STRING];//从训练文件中读出的词
+	char tmp[MAX_STRING];
 	FILE *fin;
 	long long i, index;
 	
@@ -349,7 +351,10 @@ void learnVocabFromTrainFile()
 	
 	while (1) 
 	{
-		readWordFromFile(word, fin);//从训练文件中读取一个词
+		readWord(word, fin);//从训练文件中读取一个词
+		do readWord(tmp,fin);
+		while (!strcmp("</s>",tmp))
+			
 		if (feof(fin)) 
 			break;
 		train_words++;//待训练但词个数加1
@@ -1092,7 +1097,6 @@ void *trainModelThread(void *id)
 	char ch;
 
 	char content[MAX_STRING];//保存构造句子时从文件中读出的内容
-	bool begin=true;//表示需要跳过不完整的句子
 	int flag=1;//判断当前获得的信息是词信息还是频次信息
 
 	long long word;//向句中添加单词用，句子完成后表示句子中的当前单词(即中心词)在词表中的位置
@@ -1175,14 +1179,17 @@ void *trainModelThread(void *id)
 					if (sentence_length >= MAX_SENTENCE_LENGTH) 
 						break;
 				}
-				else
+				if (wl > 0)
 				{
-					senPro[pro_length] = atof(content); //保存当前词的概率值
-					//memcpy(&senPro[pro_length], content, 20);
-					pro_length++;
-					assert(pro_length == sentence_length); //debug
+					if (!flag)
+					{
+						senPro[pro_length] = atof(content); //保存当前词的概率值
+						//memcpy(&senPro[pro_length], content, 20);
+						pro_length++;
+						assert(pro_length == sentence_length); //debug
+					}
+					flag = !flag;
 				}	
-				flag = !flag;
 			}
 		}//句子读入结束
 		
@@ -1213,12 +1220,22 @@ void *trainModelThread(void *id)
 			hiddenVecE[i] = 0;
 		
 		//训练CBOW模型
-		trainTraditionalCBOW(sen,sentence_length,hiddenVec,hiddenVecE,next_random,word);//传统CBOW模型的训练(hs+neg)
-		trainWordLatticeCBOW(sen,senPro,sentence_length,hiddenVec,hiddenVecE,next_random,word);//基于词图的CBOW模型的训练(hs+neg)
-		
+		if (cbow) 
+		{
+			if (wl)
+				trainWordLatticeCBOW(sen,senPro,sentence_length,hiddenVec,hiddenVecE,next_random,word);//基于词图的CBOW模型的训练(hs+neg)
+			else	
+				trainTraditionalCBOW(sen,sentence_length,hiddenVec,hiddenVecE,next_random,word);//传统CBOW模型的训练(hs+neg)
+		}
 		//训练skip-gram模型
-		trainTraditionalSkipgram(sen,sentence_length,hiddenVec,hiddenVecE,next_random);//传统ship-gram模型的训练(hs+neg)
-		trainWordLatticeSkipgram(sen,senPro,sentence_length,hiddenVec,hiddenVecE,next_random);//基于词图的ship-gram模型的训练(hs+neg)
+		else 
+		{
+			if (wl)
+				trainWordLatticeSkipgram(sen,senPro,sentence_length,hiddenVec,hiddenVecE,next_random);//基于词图的ship-gram模型的训练(hs+neg)
+			else 
+				trainTraditionalSkipgram(sen,sentence_length,hiddenVec,hiddenVecE,next_random);//传统ship-gram模型的训练(hs+neg)
+
+		}
 
 		//清空当前句子长度信息
 		sentence_length=0;
