@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
@@ -353,7 +354,7 @@ void learnVocabFromTrainFile()
 	{
 		readWord(word, fin);//从训练文件中读取一个词
 		do readWord(tmp,fin);
-		while (!strcmp("</s>",tmp))
+		while (!strcmp("</s>",tmp));
 			
 		if (feof(fin)) 
 			break;
@@ -1118,8 +1119,8 @@ void *trainModelThread(void *id)
 	
 	 //每个线程对应一段文本。根据线程id找到自己负责的文本的初始位置 
 	fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
-	do ch = fgetc(fin);
-	while (ch != '\n')//读入当前字符
+	do ch = fgetc(fi);
+	while (ch != '\n');//读入当前字符
 	
 	while (1) 
 	{
@@ -1204,8 +1205,8 @@ void *trainModelThread(void *id)
 			last_word_count = 0;
 			sentence_length = 0;
 			fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
-			do ch = fgetc(fin);
-			while (ch != '\n')//读入当前字符
+			do ch = fgetc(fi);
+			while (ch != '\n');//读入当前字符
 			
 			continue;//开始新的一轮迭代
 		}
